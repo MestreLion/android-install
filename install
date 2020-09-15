@@ -1,0 +1,221 @@
+#!/bin/bash -ue
+#
+# install - Installer for Android Studio IDE in Debian/Ubuntu/Mint
+#
+#    Copyright (C) 2015 Rodrigo Silva (MestreLion) <linux@rodrigosilva.com>
+#
+#    This program is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#    This program is distributed in the hope that it will be useful,
+#    but WITHOUT ANY WARRANTY; without even the implied warranty of
+#    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#    GNU General Public License for more details.
+#
+#    You should have received a copy of the GNU General Public License
+#    along with this program. If not, see <http://www.gnu.org/licenses/gpl.html>
+
+# TODO:
+# - install udev rules
+# - enable KVM hardware vitualization acceleration
+# - recommended packages
+# - Java
+
+# ---------------------------------------------------------------
+# User preferences
+
+# Root path used as prefix for other relevant directories
+rootdir="$HOME"/.local/opt/android
+
+# Path to install the Android Studio IDE
+idedirname=studio
+
+# Path to desktop integration files (icons, menu, etc)
+xdgdir="$rootdir"/xdg
+
+# Path to download archives
+# Other than the default, good candidates are:
+# downloadsdir=${XDG_CACHE_HOME:-"$HOME"/.cache}/"$basename"
+# downloadsdir=$(mktemp -d); trap 'rm -rf "$downloadsdir"' -EXIT
+downloadsdir="$rootdir"/downloads
+
+# Flags and options
+verbose=1
+
+# ---------------------------------------------------------------
+# Constants and globals - do NOT change!
+
+myname=${0##*/}
+mydir=$(dirname "$(readlink -f "$0")")
+
+basename=android-studio  # must match icon files in $mydir/icons
+mainurl=https://developer.android.com/sdk/index.html
+
+idedir="$rootdir"/"${idedirname##*/}"
+
+
+icondir="$mydir"/icons
+exec="$idedir"/bin/studio.sh
+
+# ---------------------------------------------------------------
+# Helper functions
+
+have_x11() { [[ "${DISPLAY:-}" ]]; }
+
+bold()    { tput bold; printf '%s' "$@"; tput sgr0; }
+red()     { tput setaf 1; bold "$@"; }
+green()   { tput setaf 2; bold "$@"; }
+
+fatal()   { (($#)) && echo "$(red "$@")" >&2 || :; exit 1; }
+message() { ((verbose)) && echo "$(green '* ' "$@")" || :; }
+
+unzip_stripa() {
+	# Not 100% robust, but gets the job done
+	# Does test if there is a (single) top-level dir.
+	# Requires contents not to have same name as to-level dir
+	# (as in f.zip/foo/foo)
+	# Method: extract zipfile to destdir, move top-level contents one level
+	# up (ie, to destdir), remove top level dir
+	local zipfile=$1
+	local destdir=${2:-.}
+	shift; shift
+	local zipargs=("$@")
+	unzip "${zipargs[@]}" -d "$destdir" "$zipfile" &&
+	f=("$destdir"/*) &&
+	if (( ${#f[@]} == 1 )) && [[ -d "${f[0]}" ]] ; then
+		mv "$destdir"/*/* "$destdir" &&
+		rmdir "${f[@]}"
+	fi
+}
+
+unzip_stripb() (
+	local zipfile=$1
+	local destdir=${2:-.}
+	shift; shift
+	local zipargs=("$@")
+	local tempdir
+	local toplevel
+	
+	trap 'echo trap' -EXIT
+	return
+
+	mkdir -p "$destdir" &&
+	tempdir=$(mktemp -d --tempdir "$destdir") &&
+
+	unzip "${zipargs[@]}" -d "$tempdir" "$zipfile" &&
+	shopt -s dotglob &&
+	toplevel=("$tempdir"/*) &&
+	if [[ ${#toplevel[@]} = 1 ]] && [[ -d "$toplevel" ]] ; then
+		mv "$tempdir"/*/* "$destdir"
+	else
+		mv "$tempdir"/* "$destdir"
+	fi &&
+	rmdir "$tempdir"  # could also be:
+)
+
+
+
+# ---------------------------------------------------------------
+# Parse website for EULA, download URL and its SHA1
+
+message "Visiting $mainurl to get download URL and License Agreement"
+
+{
+read -r sha url intro
+
+if have_x11; then
+	zenity --text-info \
+		--width 950 --height 500 \
+		--window-icon "$icondir"/"$basename"-128.png \
+		--ok-label "Download and install ${url##*/}" \
+		--checkbox "I have read and agree with the above terms and conditions" \
+		--title "$intro"
+else
+	# No X11, show EULA using a console dialog
+	# less(1) is also a good choice, see man(1) for prompts
+	# less -P "Scroll down to read until the end of the terms,
+	#	"press 'q' to agree with terms or CTRL+C to cancel" -K
+	if ((${#intro} > $(tput cols) - 5)); then
+		whiptail --title "Android Software Development Kit License Agreement" \
+			--scrolltext \
+			--yesno "$intro\n\n$(cat)\n(END)" \
+				$(($(tput lines)-3)) $(($(tput cols)-3)) \
+			--yes-button "I have read and agree"
+	else
+		whiptail --title "$intro" \
+			--scrolltext \
+			--yesno "$(cat)\n(END)" \
+				$(($(tput lines)-3)) $(($(tput cols)-3)) \
+			--yes-button "I have read and agree with the above terms and conditions"
+	fi
+fi
+} < <(
+wget -q -O - "$mainurl" |
+awk '
+	BEGIN {
+		IGNORECASE = 1
+		sp = "[\n\t ]*"
+		qt = "[\x22\x27]"
+		RS = "</[^>]*>" sp
+		terms = ""
+	}
+	$0 ~ sp "class" sp "=" sp qt "sdk-terms-intro" qt {
+		gsub(/\n/, " ")
+		gsub(/<[^>]*>/, "")
+		intro = $0
+	}
+	$0 ~ sp "class" sp "=" sp qt "sdk-terms" qt       { eula = NR }
+	eula && NR > eula && /^<div/                      { eula = 0 }
+	eula {
+		gsub("<[^>]*>" sp, "")
+		terms = terms $0 "\n\n"
+	}
+	$0 ~ sp "id" sp "=" sp qt "linux-bundle" qt &&
+	$0 ~ sp "href" sp "=" {
+		sub(".*href" sp "=" sp qt, "")
+		sub(qt ".*", "")
+		url=$0
+	}
+	url && /^<td/ {
+		sub(".*>" sp, "")
+		sub(sp "$", "")
+		if (length($0) == 40) {
+			sha=$0
+			exit
+		}
+	}
+	END {
+		sub("^" sp, "", terms)
+		sub(sp "$", "", terms)
+		print sha "\t" url "\t" intro
+		print terms
+	}
+') || fatal "Canceled by user"
+
+
+# ---------------------------------------------------------------
+# Download archive, check integrity and extract
+
+message "Downloading archive"
+
+archive="$downloadsdir"/"${url##*/}"
+mkdir -p "$downloadsdir"
+wget -NP "$downloadsdir" "$url"
+
+message "Verifying archive integrity and extracting to '$idedir'"
+sha1sum  --check - <<< "$sha  $archive"
+mkdir -p "$idedir"
+# -quo: quiet, update (extract only more recent files), no prompt on overwrite
+unzip_strip "$archive" "$idedir" -quo
+
+
+# Enable KVM hardware vitualization acceleration, if supported by the CPU
+if egrep -q '(vmx|svm)' /proc/cpuinfo; then
+	message "KVM supported! Android emulation can use hardware acceleration"
+fi
+
+message "Done!"
+# WM_CLASS(STRING) = "sun-awt-X11-XFramePeer", "jetbrains-studio"
+

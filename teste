@@ -1,0 +1,29 @@
+#!/bin/bash -xue
+
+unzip_strip() (
+	local zipfile=$1
+	local destdir=${2:-.}
+	shift && shift && :
+	local zipargs=("$@")
+	local tempdir
+	local toplevel
+
+	mkdir -p -- "$destdir" &&
+	tempdir=$(mktemp -d --tmpdir="$destdir") &&
+	echo "$tempdir" && # trap 'rmdir "$tempdir' EXIT &&
+	unzip "${zipargs[@]}" -d "$tempdir" "$zipfile" &&
+	shopt -s dotglob &&
+	toplevel=("$tempdir"/*) &&
+	if [[ ${#toplevel[@]} = 1 ]] && [[ -d "$toplevel" ]] ; then
+		mv -u "$tempdir"/*/* "$destdir"
+	else
+		mv -u "$tempdir"/* "$destdir"
+	fi  # &&
+	#rmdir "$tempdir"
+)
+
+echo before
+unzip_strip "$@" -q
+echo $?
+echo after
+
