@@ -199,7 +199,7 @@ archive="$downloadsdir"/"${url##*/}"
 mkdir -p "$downloadsdir"
 wget -NP "$downloadsdir" --no-if-modified-since -- "$url"
 
-message "Verify archive integrity and extracting to '$idedir'"
+message "Verify archive integrity and extract to: $idedir"
 sha256sum  --check - <<< "$sha  $archive"
 mkdir -p "$idedir"
 
