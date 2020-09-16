@@ -27,7 +27,7 @@
 # User preferences
 
 # Root path used as prefix for other relevant directories
-rootdir="$HOME"/.local/opt/androids
+rootdir="$HOME"/.local/opt/android
 
 # Path to install the Android Studio IDE
 idedirname=studio
@@ -47,16 +47,13 @@ verbose=1
 # ---------------------------------------------------------------
 # Constants and globals - do NOT change!
 
-myname=${0##*/}
-mydir=$(dirname "$(readlink -f "$0")")
-
 basename=android-studio  # must match icon files in $mydir/icons
 mainurl='https://developer.android.com/studio'
 
+myname=${0##*/}
+mydir=$(dirname "$(readlink -f "$0")")
 
 idedir="$rootdir"/"${idedirname##*/}"
-
-
 icondir="$mydir"/icons
 exec="$idedir"/bin/studio.sh
 
@@ -72,31 +69,35 @@ green()   { tput setaf 2; bold "$@"; }
 fatal()   { (($#)) && { red "$@"; echo; } >&2 || :; exit 1; }
 message() { ((verbose)) && { green '* ' "$@"; echo; } || :; }
 
-unzip_strip() {
-	# Not 100% robust, but gets the job done
-	# Does test if there is a (single) top-level dir.
-	# Requires contents not to have same name as to-level dir
-	# (as in f.zip/foo/foo)
-	# Method: extract zipfile to destdir, move top-level contents one level
-	# up (ie, to destdir), remove top level dir
-	local zipfile=$1
-	local destdir=${2:-.}
-	shift; shift
-	local zipargs=("$@")
-	unzip "${zipargs[@]}" -d "$destdir" "$zipfile" &&
-	f=("$destdir"/*) &&
-	if (( ${#f[@]} == 1 )) && [[ -d "${f[0]}" ]] ; then
-		mv "$destdir"/*/* "$destdir" &&
-		rmdir "${f[@]}"
+unzip-strip() (
+	set -eu
+	local archive=$1
+	local destdir=${2:-}
+	shift; shift || :
+	local tmpdir=$(mktemp -d)
+	trap 'rm -rf -- "$tmpdir"' EXIT
+	unzip -qd "$tmpdir" -- "$archive"
+	shopt -s dotglob
+	local files=("$tmpdir"/*) name i=1
+	if (( ${#files[@]} == 1 )) && [[ -d "${files[0]}" ]]; then
+		name=$(basename "${files[0]}")
+		files=("$tmpdir"/*/*)
+	else
+		name=$(basename "$archive"); name=${archive%.*}
+		files=("$tmpdir"/*)
 	fi
-}
-
+	if [[ -z "$destdir" ]]; then
+		destdir=./"$name"
+	fi
+	while [[ -f "$destdir" ]]; do destdir=${destdir}-$((i++)); done
+	mkdir -p "$destdir"
+	cp -ar "$@" -t "$destdir" -- "${files[@]}"
+)
 
 # ---------------------------------------------------------------
 # Parse website for EULA, download URL and its SHA1
 
 message "Hit $mainurl to get download URL, License Agreement and small icon"
-
 
 {
 read -r sha url intro
@@ -201,14 +202,14 @@ wget -NP "$downloadsdir" --no-if-modified-since -- "$url"
 message "Verify archive integrity and extracting to '$idedir'"
 sha256sum  --check - <<< "$sha  $archive"
 mkdir -p "$idedir"
-# -quo: quiet, update (extract only more recent files), no prompt on overwrite
 
 shopt -s extglob
 case "$archive" in
-*.zip) unzip_strip "$archive" "$idedir" -quo;;
+*.zip) unzip_strip "$archive" "$idedir" -u;;
 *.tar.@(gz|bz2|xz)) tar -xaf "$archive" -C "$idedir" --strip-components=1 --skip-old-files;;
 *) fatal "unsupported archive type: $archive";;
 esac
+shopt -u extglob
 
 # Enable KVM hardware vitualization acceleration, if supported by the CPU
 if egrep -q '(vmx|svm)' /proc/cpuinfo; then
