@@ -27,7 +27,7 @@
 # User preferences
 
 # Root path used as prefix for other relevant directories
-rootdir="$HOME"/.local/opt/android
+rootdir="$HOME"/.local/opt/androids
 
 # Path to install the Android Studio IDE
 idedirname=studio
@@ -51,7 +51,8 @@ myname=${0##*/}
 mydir=$(dirname "$(readlink -f "$0")")
 
 basename=android-studio  # must match icon files in $mydir/icons
-mainurl=https://developer.android.com/sdk/index.html
+mainurl='https://developer.android.com/studio'
+
 
 idedir="$rootdir"/"${idedirname##*/}"
 
@@ -68,10 +69,10 @@ bold()    { tput bold; printf '%s' "$@"; tput sgr0; }
 red()     { tput setaf 1; bold "$@"; }
 green()   { tput setaf 2; bold "$@"; }
 
-fatal()   { (($#)) && echo "$(red "$@")" >&2 || :; exit 1; }
-message() { ((verbose)) && echo "$(green '* ' "$@")" || :; }
+fatal()   { (($#)) && { red "$@"; echo; } >&2 || :; exit 1; }
+message() { ((verbose)) && { green '* ' "$@"; echo; } || :; }
 
-unzip_stripa() {
+unzip_strip() {
 	# Not 100% robust, but gets the job done
 	# Does test if there is a (single) top-level dir.
 	# Requires contents not to have same name as to-level dir
@@ -90,48 +91,24 @@ unzip_stripa() {
 	fi
 }
 
-unzip_stripb() (
-	local zipfile=$1
-	local destdir=${2:-.}
-	shift; shift
-	local zipargs=("$@")
-	local tempdir
-	local toplevel
-	
-	trap 'echo trap' -EXIT
-	return
-
-	mkdir -p "$destdir" &&
-	tempdir=$(mktemp -d --tempdir "$destdir") &&
-
-	unzip "${zipargs[@]}" -d "$tempdir" "$zipfile" &&
-	shopt -s dotglob &&
-	toplevel=("$tempdir"/*) &&
-	if [[ ${#toplevel[@]} = 1 ]] && [[ -d "$toplevel" ]] ; then
-		mv "$tempdir"/*/* "$destdir"
-	else
-		mv "$tempdir"/* "$destdir"
-	fi &&
-	rmdir "$tempdir"  # could also be:
-)
-
-
 
 # ---------------------------------------------------------------
 # Parse website for EULA, download URL and its SHA1
 
-message "Visiting $mainurl to get download URL and License Agreement"
+message "Hit $mainurl to get download URL, License Agreement and small icon"
+
 
 {
 read -r sha url intro
-
+# Icon:
+# <link rel="shortcut icon" href="https://.../.../favicon.png">
 if have_x11; then
 	zenity --text-info \
 		--width 950 --height 500 \
-		--window-icon "$icondir"/"$basename"-128.png \
+		--window-icon "$icondir"/studio.png \
 		--ok-label "Download and install ${url##*/}" \
 		--checkbox "I have read and agree with the above terms and conditions" \
-		--title "$intro"
+		--title "${intro}"
 else
 	# No X11, show EULA using a console dialog
 	# less(1) is also a good choice, see man(1) for prompts
@@ -153,37 +130,54 @@ else
 fi
 } < <(
 wget -q -O - "$mainurl" |
-awk '
+awk -v key='studio_linux_bundle_download' '
 	BEGIN {
 		IGNORECASE = 1
-		sp = "[\n\t ]*"
-		qt = "[\x22\x27]"
-		RS = "</[^>]*>" sp
+		ss = "[\n\t ]+"       # mandatory whitespace
+		sp = "[\n\t ]*"       # optional whitespace
+		qt = "[\x22\x27]"     # a single quote
+		ct = "[^>]*"          # optional everything until close tag >
+		nq = "[^\x22\x27>]*"  # zero or more not quotes or <
+		RS = "</" ct ">" sp   # Any HTML closing tag with optional trailing space
 		terms = ""
 	}
-	$0 ~ sp "class" sp "=" sp qt "sdk-terms-intro" qt {
-		gsub(/\n/, " ")
-		gsub(/<[^>]*>/, "")
+
+	# Linux EULA marker: after id = key
+	$0 ~ ss "id" sp "=" sp qt key qt { linux = 1 }
+
+	# INTRO: first <p> after linux
+	linux && ! intro && $0 ~ "^<p(" ss ct ")?>" {
+		gsub(/\n/, " ")       # join lines with a single space
+		gsub("<" ct ">", "")  # remove tags (the opening <p> itself)
 		intro = $0
 	}
-	$0 ~ sp "class" sp "=" sp qt "sdk-terms" qt       { eula = NR }
-	eula && NR > eula && /^<div/                      { eula = 0 }
-	eula {
-		gsub("<[^>]*>" sp, "")
-		terms = terms $0 "\n\n"
+
+	# TERMS: after linux, all content after class containing "sdk-terms" until the next <div>
+	linux && $0 ~ ss "class" sp "=" sp qt nq "sdk-terms" nq qt  { eula = NR }
+	linux && eula && NR > eula && /^<div/                       { eula = 0; linux = 0 }
+	eula && /<(div|h[1-6])/ {
+		$0 = $0 "\n\n"  # For <div> and headers <hN> add trailing blank line
 	}
-	$0 ~ sp "id" sp "=" sp qt "linux-bundle" qt &&
-	$0 ~ sp "href" sp "=" {
+	eula {
+		gsub("<" ct ">", "")  # Remove tag
+		terms = terms $0
+	}
+
+	# URL: href when data-category = key
+	$0 ~ ss "data-category" sp "=" sp qt key qt &&
+	$0 ~ ss "href" sp "=" {
 		sub(".*href" sp "=" sp qt, "")
 		sub(qt ".*", "")
 		url=$0
 	}
-	url && /^<td/ {
+
+	# SHA: <td> with SHA256 length (64) after first key appearance
+	! sha && $0 ~ key { getsha=1 }
+	! sha && getsha && /^<td/ {
 		sub(".*>" sp, "")
 		sub(sp "$", "")
-		if (length($0) == 40) {
+		if (length($0) == 64) {
 			sha=$0
-			exit
 		}
 	}
 	END {
@@ -198,18 +192,23 @@ awk '
 # ---------------------------------------------------------------
 # Download archive, check integrity and extract
 
-message "Downloading archive"
+message "Download archive"
 
 archive="$downloadsdir"/"${url##*/}"
 mkdir -p "$downloadsdir"
-wget -NP "$downloadsdir" "$url"
+wget -NP "$downloadsdir" --no-if-modified-since -- "$url"
 
-message "Verifying archive integrity and extracting to '$idedir'"
-sha1sum  --check - <<< "$sha  $archive"
+message "Verify archive integrity and extracting to '$idedir'"
+sha256sum  --check - <<< "$sha  $archive"
 mkdir -p "$idedir"
 # -quo: quiet, update (extract only more recent files), no prompt on overwrite
-unzip_strip "$archive" "$idedir" -quo
 
+shopt -s extglob
+case "$archive" in
+*.zip) unzip_strip "$archive" "$idedir" -quo;;
+*.tar.@(gz|bz2|xz)) tar -xaf "$archive" -C "$idedir" --strip-components=1 --skip-old-files;;
+*) fatal "unsupported archive type: $archive";;
+esac
 
 # Enable KVM hardware vitualization acceleration, if supported by the CPU
 if egrep -q '(vmx|svm)' /proc/cpuinfo; then
@@ -218,4 +217,3 @@ fi
 
 message "Done!"
 # WM_CLASS(STRING) = "sun-awt-X11-XFramePeer", "jetbrains-studio"
-
