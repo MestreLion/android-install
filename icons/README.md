@@ -27,12 +27,19 @@ named as `android-studio`.
 Icon Sources
 ------------
 
-- `favicon.png` (32x32): Actual shortcut icon from
-   [Android Studio website](https://developer.android.com/studio),
-   extracted from its `<link rel="shortcut icon">` tag.
+Icons were extracted from the Android Studio IDE window itself.
+The window contains 2 icons, 128x128 and 32x32, as shown by `xprop`.
 
-- `studio.png` (128x128): Android Studio 4.0.1 archive,
-   path `/android-studio/bin/studio.png`
+- `studio-128.png`, `studio-32.png`: extracted icon data from the IDE window
+   using [`xdg-extract-icons`](https://github.com/MestreLion/xdg-tools), which
+   reads the icon data using `xprop` and convert them to `png` images using
+   ImageMagik's `convert`.
 
-- `studio.svg` (scalable, 128x128 nominal): Android Studio 4.0.1 archive,
-   path `/android-studio/bin/studio.svg`
+The source images of the window icon data are believed to be:
+
+- `androidstudio.svg` (scalable, 128x128 nominal): Android Studio 4.0.1 archive,
+   path `/artwork/androidstudio.svg` inside `/android-studio/lib/resources.jar`.
+   Also found at `/android-studio/bin/studio.svg`.
+
+- `androidstudio-small.svg` (scalable, 16x16 nominal): Android Studio 4.0.1 archive,
+   path `/artwork/androidstudio-small.svg` inside `/android-studio/lib/resources.jar`.
