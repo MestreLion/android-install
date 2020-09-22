@@ -9,7 +9,7 @@ Filename should be in the format:
 
 	*[-WIDTH].{png,svg}
 
-Where `WIDTH` is, duh, the width of the image. For example, `studio-48.png`
+Where `WIDTH` is, the width of the image in pixels. For example, `studio-48.png`
 for a 48x48 icon. Image does not have to actually be that size, it will only
 be registered as such.
 
@@ -35,11 +35,55 @@ The window contains 2 icons, 128x128 and 32x32, as shown by `xprop`.
    reads the icon data using `xprop` and convert them to `png` images using
    ImageMagik's `convert`.
 
-The source images of the window icon data are believed to be:
+The source images of the window icon data are:
 
 - `androidstudio.svg` (scalable, 128x128 nominal): Android Studio 4.0.1 archive,
-   path `/artwork/androidstudio.svg` inside `/android-studio/lib/resources.jar`.
+   path [`/artwork/androidstudio.svg`](sources/artwork/androidstudio.svg)
+   inside `/android-studio/lib/resources.jar`.
    Also found at `/android-studio/bin/studio.svg`.
 
 - `androidstudio-small.svg` (scalable, 16x16 nominal): Android Studio 4.0.1 archive,
-   path `/artwork/androidstudio-small.svg` inside `/android-studio/lib/resources.jar`.
+   path [`/artwork/androidstudio-small.svg`](sources/artwork/androidstudio-small.svg)
+   inside `/android-studio/lib/resources.jar`.
+
+Those files are loaded as window icons by the following method:
+
+- [`AndroidStudioApplicationInfo.xml`](sources/idea/AndroidStudioApplicationInfo.xml)
+   inside `/android-studio/lib/resources.jar`, and possibly other `*ApplicationInfo.xml`
+   files in other locations, is parsed by the IntelliJ/IDEA engine at run-time by
+   [class `ApplicationInfoImpl`](sources/ApplicationInfoImpl.java). It declares
+   both SVGs in:
+
+```xml
+<icon svg="/artwork/androidstudio.svg" svg-small="/artwork/androidstudio-small.svg" .../>
+```
+
+- When creating the window, [class `AppUIUtil`](sources/AppUIUtil.java) does
+   `window.setIconImages(images)` with the following set of `images`:
+    - On all platforms, `appInfo.getSmallApplicationSvgIconUrl()`, which turns
+       out to be the `<icon svg-small>` entry in the `xml`, resized to `32` by
+       function `loadApplicationIconImage()`.
+    - On Unix, `appInfo.getApplicationSvgIconUrl()`, which is `<icon svg>`,
+       resized to `128` by the same function above.
+    - On Windows, `appInfo.getSmallApplicationSvgIconUrl()` resized to `16` by
+       `loadSmallApplicationIconImage()`, which also calls `loadApplicationIconImage()`.
+
+- To resize the images, `loadApplicationIconImage()` does not directly load the SVG files.
+   Instead, calls to `IconLoader.findIcon()`, `IconUtil.toImage()` and `IconUtil.scale()`
+   eventually lead to [class `SVGLoaderPrebuilt`](sources/SVGLoaderPrebuilt.java),
+   which looks for pre-built scaled rastered versions of the SVG image in the form
+   `file.svg-<scale>.jpix` in the path as the SVG file. This is meant as a cache
+   to speed up run-time loading of SVG files.
+
+- These cache files are generated at compile time by build script module [class
+   `ImageSvgPreCompiler`](sources/ImageSvgPreCompiler.kt), which generates them
+   at scales 1.0, 1.25, 1.5, 2.0 and 2.5 for all SVG files _that do **not** contain
+   `xlink:href="data:`_, which happens to be the case of the large, 128x128 icon
+   `androidstudio.svg`, so it does not have any pre-built files. The small 16x16
+   `androidstudio-small.svg` gets the full set of pre-built cache files.
+
+- So, at run-time the 128x128 icon is reading from `androidstudio.svg`, while the
+   small 32x32 icon data is actually taken from `androidstudio-small.svg-2.0.jpix`
+
+- As a side note, the `.jpix` is not an actual image format, but simply the data
+   from a `java.awt.BufferedImage` instance dumped to a file.
