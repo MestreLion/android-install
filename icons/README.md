@@ -46,7 +46,7 @@ The source images of the window icon data are:
    path [`/artwork/androidstudio-small.svg`](sources/artwork/androidstudio-small.svg)
    inside `/android-studio/lib/resources.jar`.
 
-Those files are loaded as window icons by the following method:
+The above files are loaded as window icons in Android Studio by the following method:
 
 - [`AndroidStudioApplicationInfo.xml`](sources/idea/AndroidStudioApplicationInfo.xml)
    inside `/android-studio/lib/resources.jar`, and possibly other `*ApplicationInfo.xml`
@@ -68,22 +68,45 @@ Those files are loaded as window icons by the following method:
     - On Windows, `appInfo.getSmallApplicationSvgIconUrl()` resized to `16` by
        `loadSmallApplicationIconImage()`, which also calls `loadApplicationIconImage()`.
 
-- To resize the images, `loadApplicationIconImage()` does not directly load the SVG files.
-   Instead, calls to `IconLoader.findIcon()`, `IconUtil.toImage()` and `IconUtil.scale()`
-   eventually lead to [class `SVGLoaderPrebuilt`](sources/SVGLoaderPrebuilt.java),
-   which looks for pre-built scaled rastered versions of the SVG image in the form
-   `file.svg-<scale>.jpix` in the path as the SVG file. This is meant as a cache
-   to speed up run-time loading of SVG files.
+- To resize the images, `loadApplicationIconImage()` does not directly load the
+   SVG files. Instead, calls to `IconLoader.findIcon()`, `IconUtil.toImage()`
+   and `IconUtil.scale()` eventually lead to [class `SVGLoaderPrebuilt`](
+   sources/SVGLoaderPrebuilt.java), which looks for pre-built, pre-scaled rastered
+   versions of the SVG image in the form `file.svg-<scale>.jpix` in the path as
+   the SVG file. This is meant as a cache to speed up run-time loading of SVG files.
 
 - These cache files are generated at compile time by build script module [class
    `ImageSvgPreCompiler`](sources/ImageSvgPreCompiler.kt), which generates them
    at scales 1.0, 1.25, 1.5, 2.0 and 2.5 for all SVG files _that do **not** contain
    `xlink:href="data:`_, which happens to be the case of the large, 128x128 icon
    `androidstudio.svg`, so it does not have any pre-built files. The small 16x16
-   `androidstudio-small.svg` gets the full set of pre-built cache files.
+   `androidstudio-small.svg` gets the full set of these pre-built cache files.
 
-- So, at run-time the 128x128 icon is reading from `androidstudio.svg`, while the
+- So, at run-time the 128x128 icon is loading from `androidstudio.svg`, while the
    small 32x32 icon data is actually taken from `androidstudio-small.svg-2.0.jpix`
 
 - As a side note, the `.jpix` is not an actual image format, but simply the data
    from a `java.awt.BufferedImage` instance dumped to a file.
+
+---
+
+What about `/bin/studio.svg` and `/bin/studio.png` in the Android Studio archive?
+Are they used by the Android Studio IDE? Where do they come from?
+
+- First of all, they are _not_ used at all by the IDE. They are included in the
+   archive as a mere convenience to users and third-party packagers such as
+   Snapcraft or Debian to have easily-acessible icons.
+
+- They are _not_ in this location in the source package either: they are copied
+   to the archive's `/bin` by packaging scripts at **build** time.
+
+- On all platforms, the application SVG icon, [`/artwork/androidstudio.svg`](
+   sources/artwork/androidstudio.svg) is copied to `/bin/studio.svg` by
+   `layoutShared()` in [`BuildTasksImpl.groovy`](sources/BuildTasksImpl.groovy).
+
+- On Linux, [`/artwork/icon_AS_128.png`](sources/artwork/icon_AS_128.png) is
+   copied to `/bin/studio.png` by function `createLinuxCustomizer()` in
+   [`AndroidStudioProperties.groovy`](sources/AndroidStudioProperties.groovy).
+   This file. _if_ derived from `androidstudio.svg`, did **not** use the same
+   SVG rastering engine as the run-time IDE, as its image data subtly differs
+   from the one extracted from the window icon.
