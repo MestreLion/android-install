@@ -55,6 +55,7 @@ mydir=$(dirname "$(readlink -f "$0")")
 
 idedir="$rootdir"/"${idedirname##*/}"
 icondir="$mydir"/icons
+bindir=${XDG_BIN_HOME:-$HOME/.local/bin}
 exec="$idedir"/bin/studio.sh
 
 # ---------------------------------------------------------------
@@ -97,7 +98,7 @@ unzip-strip() (
 # ---------------------------------------------------------------
 # Parse website for EULA, download URL and its SHA1
 
-message "Hit $mainurl to get download URL, License Agreement and small icon"
+message "Hit $mainurl to get download URL and License Agreement"
 
 {
 read -r sha url intro
@@ -216,5 +217,32 @@ if egrep -q '(vmx|svm)' /proc/cpuinfo; then
 	message "KVM supported! Android emulation can use hardware acceleration"
 fi
 
+message "Install desktop integration: launcher, icons and menu entry"
+if ! [[ -f "$bindir"/"$basename" ]]; then
+	ln -s "$exec" "$bindir"/"$basename"
+fi
+mkdir -p -- "$xdgdir"
+for icon in "$mydir"/icons/"$idedirname"-*.png; do
+	cp -- "$icon" "$xdgdir"
+	size=$(identify -format '%w' "$icon")
+	xdg-icon-resource install --noupdate --novendor --size "$size" "$icon" "$basename"
+done
+xdg-icon-resource forceupdate
+
+cat > "$xdgdir"/"$basename".desktop <<-EOF
+	[Desktop Entry]
+	Version=1.0
+	Type=Application
+	Name=Android Studio IDE
+	GenericName=Mobile IDE
+	Comment=Create Android Apps
+	Categories=Development;IDE;
+	Terminal=false
+	StartupNotify=true
+	StartupWMClass=jetbrains-studio
+	Icon=$basename
+	Exec=$basename %f
+EOF
+xdg-desktop-menu install --novendor "$xdgdir"/"$basename".desktop
+
 message "Done!"
-# WM_CLASS(STRING) = "sun-awt-X11-XFramePeer", "jetbrains-studio"
