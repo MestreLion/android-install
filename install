@@ -43,6 +43,7 @@ downloadsdir="$rootdir"/downloads
 
 # Flags and options
 verbose=1
+force=0
 
 # ---------------------------------------------------------------
 # Constants and globals - do NOT change!
@@ -68,6 +69,7 @@ red()     { tput setaf 1; bold "$@"; }
 green()   { tput setaf 2; bold "$@"; }
 
 fatal()   { (($#)) && { red "$@"; echo; } >&2 || :; exit 1; }
+warning() { (($#)) && { red '* Warning: ' "$@"; echo; } >&2 || :; }
 message() { ((verbose)) && { green '* ' "$@"; echo; } || :; }
 
 unzip-strip() (
@@ -94,6 +96,51 @@ unzip-strip() (
 	mkdir -p "$destdir"
 	cp -ar "$@" -t "$destdir" -- "${files[@]}"
 )
+
+# ---------------------------------------------------------------
+# Check Hardware Acceleration support, enabling it if possible
+
+check_kvm() {
+	local msg grp group=kvm dev=/dev/kvm
+
+	if ! egrep -q '(vmx|svm)' /proc/cpuinfo 2>/dev/null; then
+		warning "KVM is not supported by your CPU, Android emulation" \
+			" without hardware acceleration will be SLOW!"
+		return
+	fi
+
+	message "KVM supported! Android emulation can use hardware acceleration"
+	if ! [[ -e "$dev" ]]; then
+		msg=("KVM is disabled, please reboot and enable Virtualization"
+			" (VT-d / AMD-V / SVM) in your UEFI/BIOS CPU settings"
+			" to allow hardware acceleration in Android emulation")
+		if ((force)); then
+			warning "${msg[@]}" '.'
+		else
+			fatal "${msg[@]}" ", or try again with --force."
+		fi
+		return
+	fi
+	if [[ -w "$dev" ]]; then
+		return  # all done
+	fi
+
+	#sudo apt install qemu-kvm  # seems unnecessary
+	grp=$(stat --format %G -- "$dev")
+	if [[ "$grp" == 'root' ]]; then
+		if ! $(getent group "$group" &>/dev/null); then
+			sudo addgroup --system "$group"
+		fi
+		sudo chgrp "$group" -- "$dev"
+	else
+		group=$grp
+	fi
+	sudo chmod g+rw -- "$dev"
+	sudo adduser "$USER" "$group"
+	warning "KVM enabled. You'll need to re-login to use it."
+}
+
+check_kvm
 
 # ---------------------------------------------------------------
 # Parse website for EULA, download URL and its SHA1
@@ -211,11 +258,6 @@ case "$archive" in
 *) fatal "unsupported archive type: $archive";;
 esac
 shopt -u extglob
-
-# Enable KVM hardware vitualization acceleration, if supported by the CPU
-if egrep -q '(vmx|svm)' /proc/cpuinfo; then
-	message "KVM supported! Android emulation can use hardware acceleration"
-fi
 
 message "Install desktop integration: launcher, icons and menu entry"
 if ! [[ -f "$bindir"/"$basename" ]]; then
