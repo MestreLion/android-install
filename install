@@ -100,6 +100,13 @@ unzip-strip() (
 # ---------------------------------------------------------------
 # Check Hardware Acceleration support, enabling it if possible
 
+udev_rule() {
+	echo "KERNEL==\"kvm\", GROUP=\"$1\", MODE=\"0666\", OPTIONS+=\"static_node=kvm\"" |
+	sudo tee /etc/udev/rules.d/99-enable_kvm.rules >/dev/null
+	sudo udevadm control --reload-rules
+	sudo udevadm trigger --name-match=kvm
+}
+
 check_kvm() {
 	local msg grp group=kvm dev=/dev/kvm
 
@@ -125,19 +132,19 @@ check_kvm() {
 		return  # all done
 	fi
 
-	#sudo apt install qemu-kvm  # seems unnecessary
+	# Installing qemu-kvm is NOT necessary!
 	grp=$(stat --format %G -- "$dev")
 	if [[ "$grp" == 'root' ]]; then
 		if ! $(getent group "$group" &>/dev/null); then
 			sudo addgroup --system "$group"
 		fi
-		sudo chgrp "$group" -- "$dev"
+		udev_rule "$group"
 	else
-		group=$grp
+		udev_rule "$grp"
+		# or:
+		#sudo adduser "$USER" "$grp"
+		#warning "KVM enabled. You'll need to re-login to use it."
 	fi
-	sudo chmod g+rw -- "$dev"
-	sudo adduser "$USER" "$group"
-	warning "KVM enabled. You'll need to re-login to use it."
 }
 
 check_kvm
